@@ -58,7 +58,7 @@ services:
       - APP_URL=localhost
       - APP_KEY=ugTtoNhmw95FG1vy14e+BM/kaF1QyWG0tI/f+sqZ+pQ=
       - DB_HOST=mysql
-      - DB_PORT=3306
+      - DB_PORT=${MYSQL_PORT}
       - DB_USERNAME=${MYSQL_USER}
       - DB_PASSWORD=${MYSQL_PASSWORD}
       - DB_DATABASE=${MYSQL_DATABASE}
@@ -90,6 +90,8 @@ services:
       - mysql_data:/var/lib/mysql  # Stockage persistant de la base de données
       - ./backup:/backup  # Monte un dossier pour stocker les sauvegardes
     command: --default-authentication-plugin=mysql_native_password  # Assure la compatibilité avec les connexions MySQL classiques
+    ports:
+      - ${MYSQL_PORT}:3306  # Expose le port MySQL
     networks:
       - traefik_network
 
