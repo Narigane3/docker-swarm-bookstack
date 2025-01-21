@@ -19,6 +19,10 @@ services:
       - "--accesslog=true"
       - "--accesslog.filepath=/logs/access.log"
       - "--accesslog.bufferingsize=100"
+      # Active le dashboard Traefik
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+
     ports:
       - "80:80"  # Expose le service HTTP
       - "443:443" # Expose le service HTTPS
