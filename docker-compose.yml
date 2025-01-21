@@ -55,7 +55,7 @@ services:
       - PUID=1000
       - PGID=1000
       - TZ=Etc/UTC
-      - APP_URL=localhost
+      - APP_URL=${APP_URL}
       - APP_KEY=ugTtoNhmw95FG1vy14e+BM/kaF1QyWG0tI/f+sqZ+pQ=
       - DB_HOST=mysql
       - DB_PORT=${MYSQL_PORT}
