@@ -52,13 +52,17 @@ services:
     env_file:
       - .env  # Charge les variables d'environnement depuis un fichier externe
     environment:
-      - PUID=${PUID}  # ID utilisateur pour éviter les conflits de permissions
-      - PGID=${PGID}  # ID de groupe pour éviter les conflits de permissions
-      - DB_HOST=${DB_HOST}  # Adresse de la base de données
-      - DB_USER=${DB_USER}  # Nom d'utilisateur de la base de données
-      - DB_PASS=${DB_PASS}  # Mot de passe de la base de données
-      - DB_DATABASE=${DB_DATABASE}  # Nom de la base de données
-      - APP_URL=https://${APP_URL}  # URL publique de l'application
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=Etc/UTC
+      - APP_URL=https://${APP_URL}
+      - APP_KEY=${APP_KEY}
+      - DB_HOST=mysql
+      - DB_PORT=${MYSQL_PORT}
+      - DB_USERNAME=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_DATABASE=${MYSQL_DATABASE}
+      - QUEUE_CONNECTION=redis
     volumes:
       - bookstack_data:/config  # Stocke les fichiers de configuration et les données persistantes
       - ./bookstack.env:/config/.env  # Monte un fichier d'environnement spécifique
@@ -86,6 +90,8 @@ services:
       - mysql_data:/var/lib/mysql  # Stockage persistant de la base de données
       - ./backup:/backup  # Monte un dossier pour stocker les sauvegardes
     command: --default-authentication-plugin=mysql_native_password  # Assure la compatibilité avec les connexions MySQL classiques
+    ports:
+      - ${MYSQL_PORT}:3306  # Expose le port MySQL
     networks:
       - traefik_network
 
