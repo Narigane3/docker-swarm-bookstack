@@ -1,74 +1,71 @@
 services:
   proxy:
     image: traefik:v2.9
-    restart: always
     deploy:
-      replicas: 1
+      mode: replicated
+      replicas: 2  # Exécute 2 instances de Traefik pour la haute disponibilité
+      placement:
+        constraints:
+          - node.role == manager  # Assure que Traefik tourne sur les nœuds managers uniquement
     command:
-      # Active le support pour les conteneurs Docker
-      - "--providers.docker=true"
-      # Définit les points d'entrée pour HTTP et HTTPS
-      - "--entrypoints.web.address=:80"
-      - "--entrypoints.websecure.address=:443"
-      # Configure Let's Encrypt pour le certificat SSL automatique
-      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
-      - "--certificatesresolvers.myresolver.acme.email=${LETSENCRYPT_EMAIL}"
-      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-      # Ajout du middleware pour la redirection HTTP -> HTTPS
-      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--providers.docker=true"  # Active la détection automatique des conteneurs Docker
+      - "--providers.docker.swarmMode=true"  # Active le mode Swarm
+      - "--entrypoints.web.address=:80"  # Définit le point d'entrée HTTP
+      - "--entrypoints.websecure.address=:443"  # Définit le point d'entrée HTTPS
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"  # Configure Let's Encrypt pour générer les certificats SSL
+      - "--certificatesresolvers.myresolver.acme.email=${LETSENCRYPT_EMAIL}"  # Email requis par Let's Encrypt
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"  # Stocke les certificats SSL
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"  # Redirige automatiquement HTTP vers HTTPS
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
-      # Activation des logs d'accès et configuration
-      - "--accesslog=true"
+      - "--accesslog=true"  # Active les logs d'accès
       - "--accesslog.filepath=/logs/access.log"
       - "--accesslog.bufferingsize=100"
-      # Active le dashboard Traefik
-      - "--api.dashboard=true"
+      - "--api.dashboard=true"  # Active le tableau de bord Traefik
       - "--api.insecure=false"
-
     ports:
-      - "80:80"  # Expose le service HTTP
-      - "443:443" # Expose le service HTTPS
-      - "8080:8080" # Interface d'administration de Traefik
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Expose le tableau de bord Traefik
     volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock:ro"  # Accès à Docker pour la découverte automatique des services
-      - "./letsencrypt:/letsencrypt"  # Stockage des certificats SSL
-      - "./logs:/logs"  # Stockage des logs d'accès
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"  # Permet à Traefik de communiquer avec Docker
+      - "./letsencrypt:/letsencrypt"
+      - "./logs:/logs"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DOMAIN}`)"
+      - "traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DOMAIN}`)"  # Route pour accéder à Traefik via le domaine
       - "traefik.http.routers.traefik.service=api@internal"
       - "traefik.http.routers.traefik.entrypoints=websecure"
       - "traefik.http.routers.traefik.tls.certresolver=myresolver"
-      - "traefik.http.middlewares.auth.basicauth.users=${BASIC_AUTH}"
+      - "traefik.http.middlewares.auth.basicauth.users=${BASIC_AUTH}"  # Protection par mot de passe
       - "traefik.http.routers.traefik.middlewares=auth"
     networks:
       - traefik_network
 
   bookstack:
     image: linuxserver/bookstack:latest
-    restart: always
     deploy:
-      replicas: 2
-    env_file:
-      - .env  # Charge les variables d'environnement depuis un fichier externe
+      mode: replicated
+      replicas: 3  # Réplication pour la haute disponibilité
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=Etc/UTC
       - APP_URL=https://${APP_URL}
       - APP_KEY=${APP_KEY}
-      - DB_HOST=mysql
+      - DB_HOST=mysql  # Connexion à la base de données
       - DB_PORT=${MYSQL_PORT}
       - DB_USERNAME=${MYSQL_USER}
       - DB_PASSWORD=${MYSQL_PASSWORD}
       - DB_DATABASE=${MYSQL_DATABASE}
-      - QUEUE_CONNECTION=redis
+      - CACHE_DRIVER=redis  # Utilisation de Redis pour le cache
+      - SESSION_DRIVER=redis  # Utilisation de Redis pour les sessions
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - APP_DEBUG=true
     volumes:
-      - bookstack_data:/config  # Stocke les fichiers de configuration et les données persistantes
-      - ./bookstack.env:/config/.env  # Monte un fichier d'environnement spécifique
-    depends_on:
-      - mysql  # Attend que MySQL soit disponible avant de démarrer
-      - redis  # Attend que Redis soit disponible avant de démarrer
+      - bookstack_data:/config
+      - ./bookstack.env:/config/.env  # Monte un fichier d’environnement personnalisé
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.bookstack.rule=Host(`${APP_URL}`)"
@@ -80,47 +77,64 @@ services:
 
   mysql:
     image: mysql:8.0
-    restart: always
+    deploy:
+      mode: replicated
+      replicas: 1  # Un seul nœud MySQL pour garantir la cohérence des données
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}  # Mot de passe root MySQL
-      - MYSQL_DATABASE=${MYSQL_DATABASE}  # Base de données utilisée
-      - MYSQL_USER=${MYSQL_USER}  # Nom d'utilisateur pour BookStack
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}  # Mot de passe de l'utilisateur
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
     volumes:
-      - mysql_data:/var/lib/mysql  # Stockage persistant de la base de données
-      - ./backup:/backup  # Monte un dossier pour stocker les sauvegardes
-    command: --default-authentication-plugin=mysql_native_password  # Assure la compatibilité avec les connexions MySQL classiques
+      - mysql_data:/var/lib/mysql
+      - ./backup:/backup  # Stockage des sauvegardes
+    command: --default-authentication-plugin=mysql_native_password  # Assure la compatibilité avec BookStack
     ports:
-      - ${MYSQL_PORT}:3306  # Expose le port MySQL
+      - ${MYSQL_PORT}:3306
     networks:
       - traefik_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   redis:
     image: redis:latest
-    restart: always
-    command: ["redis-server", "--appendonly", "yes"]  # Active l'écriture persistante
+    deploy:
+      mode: replicated
+      replicas: 2  # Réplication pour la haute disponibilité
+    command: ["redis-server", "--appendonly", "yes"]  # Active la persistance des données
     volumes:
-      - redis_data:/data  # Stockage persistant des données Redis
+      - redis_data:/data
     networks:
       - traefik_network
-
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  
   backup:
+    deploy:
+      mode: replicated
+      replicas: 1
     image: debian:latest
-    restart: always
     volumes:
-      - ./backup:/backup  # Monte un dossier pour stocker les backups
+      - ./backup:/backup
     command: "/bin/sh -c 'while true; do mysqldump -h mysql -u ${MYSQL_USER} -p${MYSQL_PASSWORD} ${MYSQL_DATABASE} > /backup/bookstack_backup.sql; sleep 86400; done'"
-    depends_on:
-      - mysql  # Attend que MySQL soit disponible avant d'exécuter les sauvegardes
     networks:
       - traefik_network
 
 volumes:
-  bookstack_data:
-  mysql_data:
-  redis_data:
-  letsencrypt:  # Stockage des certificats SSL
+  bookstack_data:  # Volume pour stocker les données de BookStack
+  mysql_data:  # Volume pour stocker les données MySQL
+  redis_data:  # Volume pour stocker les données Redis
+  letsencrypt:  # Volume pour stocker les certificats SSL
 
 networks:
   traefik_network:
     external: true
+    driver: overlay  # Utilisation du réseau overlay pour Docker Swarm

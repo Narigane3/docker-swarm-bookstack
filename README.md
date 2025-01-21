@@ -1,5 +1,6 @@
-#### Authors : Papazian Loïc & Maldonado Clément
-# Doc 
+#### Authors: Papazian Loïc & Maldonado Clément
+
+# Documentation
 
 ## Installation
 
@@ -8,20 +9,33 @@
 git clone https://github.com/Narigane3/docker-swarm-bookstack.git
 ```
 
-### 2. Create the docker network
-
+### 2. Initialize Docker Swarm
 ```bash
-    docker network create traefik_network
+docker swarm init
 ```
 
-### 3. Create the .env file
-    
+### 3. Add a Worker Node
+On the manager node, retrieve the join token:
 ```bash
-    cp .env.example .env
+docker swarm join-token worker
 ```
-Edit the .env file and set the values for the environment variables.
+On the worker node, run the command provided by the manager to join the swarm:
+```bash
+docker swarm join --token <worker_token> <manager_ip>:2377
+```
 
-- `BASIC_AUTH`- Execute the following command to generate  the value for the `BASIC_AUTH` variable.
+### 4. Create the Docker network
+```bash
+docker network create --driver overlay traefik_network
+```
+
+### 5. Create the .env file
+```bash
+cp .env.example .env
+```
+Edit the `.env` file and set the values for the environment variables.
+
+- `BASIC_AUTH` - Execute the following command to generate the value for the `BASIC_AUTH` variable.
 ```bash
 sh ./generate_user_hash.sh
 ```
@@ -29,150 +43,61 @@ sh ./generate_user_hash.sh
 ```bash
 base64 /dev/urandom | head -c 32
 ```
-### 4. Start the services
+
+### 6. Deploy the services using Docker Swarm
 ```bash
-docker compose --env-file .env up --build -d
+docker stack deploy -c docker-compose.yml bookstack
 ```
-### 5. Launch the application
+
+### 7. Verify Running Services
 ```bash
-docker compose up -d
+docker service ls
 ```
 
 ## Configuration
 ### .env File Variables
 
-- `PUID` - User ID for the Docker container.
-- `PGID` - Group ID for the Docker container.
-- `TRAEFIK_DOMAIN` - Domain name for Traefik.
-- `LETSENCRYPT_EMAIL` - Email address for Let's Encrypt notifications.
-- `BASIC_AUTH` - Basic authentication hash (generated using `sh generate_user_hash.sh`).
-- `HTTP_PORT` - HTTP port for Traefik.
-- `HTTPS_PORT` - HTTPS port for Traefik.
-- `DOCKER_SOCK` - Path to Docker socket.
-- `MYSQL_ROOT_PASSWORD` - Root password for MySQL.
-- `MYSQL_DATABASE` - Name of the MySQL database.
-- `MYSQL_USER` - MySQL user name.
-- `MYSQL_PASSWORD` - Password for the MySQL user.
-- `MYSQL_PORT` - Port for MySQL.
-- `APP_URL` - URL for the BookStack application.
-- `APP_KEY` - Application key for BookStack (generated using `base64 /dev/urandom | head -c 32`).
-- `DB_HOST` - Hostname for the MySQL database.
-- `DB_DATABASE` - Name of the MySQL database (same as `MYSQL_DATABASE`).
-- `DB_USER` - MySQL user name (same as `MYSQL_USER`).
-- `DB_PASS` - Password for the MySQL user (same as `MYSQL_PASSWORD`).
+- `PUID`, `PGID`: User and Group ID for the Docker container.
+- `TRAEFIK_DOMAIN`: Domain name for Traefik.
+- `LETSENCRYPT_EMAIL`: Email for Let's Encrypt notifications.
+- `BASIC_AUTH`: Basic authentication hash.
+- `HTTP_PORT`, `HTTPS_PORT`: Ports for Traefik.
+- `DOCKER_SOCK`: Path to Docker socket.
+- `MYSQL_*`: MySQL database credentials.
+- `APP_URL`, `APP_KEY`: URL and application key for BookStack.
+- `DB_*`: Database connection details.
 
-## Details
-### Docker Compose Services
+## Docker Compose Services
 
-#### `proxy` Service
-- **image**: Uses the `traefik:v2.9` image.
-- **restart**: Always restarts the container if it stops.
-- **deploy**: Specifies deployment configurations.
-    - **replicas**: Number of container instances to run.
-- **command**: List of Traefik commands to configure the proxy.
-    - `--providers.docker=true`: Enables Docker provider.
-    - `--entrypoints.web.address=:80`: Defines HTTP entry point.
-    - `--entrypoints.websecure.address=:443`: Defines HTTPS entry point.
-    - `--certificatesresolvers.myresolver.acme.tlschallenge=true`: Enables TLS challenge for Let's Encrypt.
-    - `--certificatesresolvers.myresolver.acme.email=${LETSENCRYPT_EMAIL}`: Email for Let's Encrypt notifications.
-    - `--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json`: Path to store Let's Encrypt certificates.
-    - `--entrypoints.web.http.redirections.entryPoint.to=websecure`: Redirects HTTP to HTTPS.
-    - `--entrypoints.web.http.redirections.entryPoint.scheme=https`: Sets redirection scheme to HTTPS.
-    - `--accesslog=true`: Enables access logs.
-    - `--accesslog.filepath=/logs/access.log`: Path to access log file.
-    - `--accesslog.bufferingsize=100`: Buffer size for access logs.
-    - `--api.dashboard=true`: Enables Traefik dashboard.
-    - `--api.insecure=false`: Secures the Traefik dashboard.
-- **ports**: Exposes ports.
-    - `80:80`: HTTP port.
-    - `443:443`: HTTPS port.
-    - `8080:8080`: Traefik dashboard port.
-- **volumes**: Mounts volumes.
-    - `/var/run/docker.sock:/var/run/docker.sock:ro`: Docker socket for service discovery.
-    - `./letsencrypt:/letsencrypt`: Stores Let's Encrypt certificates.
-    - `./logs:/logs`: Stores access logs.
-- **labels**: Traefik labels for routing and middleware.
-    - `traefik.enable=true`: Enables Traefik for this service.
-    - `traefik.http.routers.traefik.rule=Host(${TRAEFIK_DOMAIN})`: Routing rule based on domain.
-    - `traefik.http.routers.traefik.service=api@internal`: Uses internal Traefik API service.
-    - `traefik.http.routers.traefik.entrypoints=websecure`: Uses HTTPS entry point.
-    - `traefik.http.routers.traefik.tls.certresolver=myresolver`: Uses Let's Encrypt resolver.
-    - `traefik.http.middlewares.auth.basicauth.users=${BASIC_AUTH}`: Basic authentication middleware.
-    - `traefik.http.routers.traefik.middlewares=auth`: Applies authentication middleware.
-- **networks**: Connects to the `traefik_network`.
+### `proxy` (Traefik)
+- Image: `traefik:v2.9`
+- High availability with `replicas: 2`, running only on manager nodes.
+- Detects and routes traffic to services automatically.
+- Uses Let's Encrypt for SSL certificates.
+- Runs in Docker Swarm mode with overlay networking.
 
-#### `bookstack` Service
-- **image**: Uses the `linuxserver/bookstack:latest` image.
-- **restart**: Always restarts the container if it stops.
-- **deploy**: Specifies deployment configurations.
-    - **replicas**: Number of container instances to run.
-- **environment**: List of environment variables.
-    - `PUID=${PUID}`: User ID for the container.
-    - `PGID=${PGID}`: Group ID for the container.
-    - `TZ=Etc/UTC`: Timezone setting.
-    - `APP_URL=https://${APP_URL}`: URL for the BookStack application.
-    - `APP_KEY=${APP_KEY}`: Application key for BookStack.
-    - `DB_HOST=mysql`: MySQL database host.
-    - `DB_PORT=${MYSQL_PORT}`: MySQL database port.
-    - `DB_USERNAME=${MYSQL_USER}`: MySQL user name.
-    - `DB_PASSWORD=${MYSQL_PASSWORD}`: MySQL user password.
-    - `DB_DATABASE=${MYSQL_DATABASE}`: MySQL database name.
-    - `QUEUE_CONNECTION=redis`: Queue connection setting.
-- **volumes**: Mounts volumes.
-    - `bookstack_data:/config`: Stores configuration and persistent data.
-- **depends_on**: Specifies service dependencies.
-    - `mysql`: Waits for MySQL to be available.
-    - `redis`: Waits for Redis to be available.
-- **labels**: Traefik labels for routing.
-    - `traefik.enable=true`: Enables Traefik for this service.
-    - `traefik.http.routers.bookstack.rule=Host(${APP_URL})`: Routing rule based on URL.
-    - `traefik.http.routers.bookstack.entrypoints=websecure`: Uses HTTPS entry point.
-    - `traefik.http.routers.bookstack.tls.certresolver=myresolver`: Uses Let's Encrypt resolver.
-    - `traefik.http.services.bookstack.loadbalancer.server.port=80`: Load balancer port.
-- **networks**: Connects to the `traefik_network`.
+### `bookstack`
+- Image: `linuxserver/bookstack:latest`
+- Runs 3 replicas for high availability.
+- Uses Redis for caching and session management.
+- Depends on MySQL and Redis.
 
-#### `mysql` Service
-- **image**: Uses the `mysql:8.0` image.
-- **restart**: Always restarts the container if it stops.
-- **environment**: List of environment variables.
-    - `MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}`: MySQL root password.
-    - `MYSQL_DATABASE=${MYSQL_DATABASE}`: MySQL database name.
-    - `MYSQL_USER=${MYSQL_USER}`: MySQL user name.
-    - `MYSQL_PASSWORD=${MYSQL_PASSWORD}`: MySQL user password.
-- **volumes**: Mounts volumes.
-    - `mysql_data:/var/lib/mysql`: Stores MySQL data.
-    - `./backup:/backup`: Mounts backup directory.
-- **command**: Sets MySQL authentication plugin.
-    - `--default-authentication-plugin=mysql_native_password`: Ensures compatibility with MySQL connections.
-- **ports**: Exposes MySQL port.
-    - `${MYSQL_PORT}:3306`: MySQL port.
-- **networks**: Connects to the `traefik_network`.
+### `mysql`
+- Image: `mysql:8.0`
+- Single replica to ensure data consistency.
+- Includes health checks to monitor database status.
+- Backed up by a `backup` service.
 
-#### `redis` Service
-- **image**: Uses the `redis:latest` image.
-- **restart**: Always restarts the container if it stops.
-- **command**: List of Redis commands.
-    - `redis-server --appendonly yes`: Enables persistent storage.
-- **volumes**: Mounts volumes.
-    - `redis_data:/data`: Stores Redis data.
-- **networks**: Connects to the `traefik_network`.
+### `redis`
+- Image: `redis:latest`
+- Runs 2 replicas for redundancy.
+- Ensures persistent storage with append-only mode.
 
-#### `backup` Service
-- **image**: Uses the `debian:latest` image.
-- **restart**: Always restarts the container if it stops.
-- **volumes**: Mounts volumes.
-    - `./backup:/backup`: Mounts backup directory.
-- **command**: Backup command.
-    - `/bin/sh -c 'while true; do mysqldump -h mysql -u ${MYSQL_USER} -p${MYSQL_PASSWORD} ${MYSQL_DATABASE} > /backup/bookstack_backup.sql; sleep 86400; done'`: Runs daily MySQL backup.
-- **depends_on**: Specifies service dependencies.
-    - `mysql`: Waits for MySQL to be available.
-- **networks**: Connects to the `traefik_network`.
+### `backup`
+- Image: `debian:latest`
+- Automates daily database backups.
 
-### Volumes
-- **bookstack_data**: Stores BookStack data.
-- **mysql_data**: Stores MySQL data.
-- **redis_data**: Stores Redis data.
-- **letsencrypt**: Stores Let's Encrypt certificates.
-
-### Networks
-- **traefik_network**: External network for Traefik.
+### Volumes & Networks
+- `bookstack_data`, `mysql_data`, `redis_data`: Persistent storage.
+- `letsencrypt`: Stores SSL certificates.
+- `traefik_network`: External overlay network for Swarm mode.
