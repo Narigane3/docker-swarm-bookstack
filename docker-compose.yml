@@ -2,6 +2,8 @@ services:
   proxy:
     image: traefik:v2.9
     restart: always
+    deploy:
+      replicas: 1
     command:
       # Active le support pour les conteneurs Docker
       - "--providers.docker=true"
@@ -45,6 +47,8 @@ services:
   bookstack:
     image: linuxserver/bookstack:latest
     restart: always
+    deploy:
+      replicas: 2
     env_file:
       - .env  # Charge les variables d'environnement depuis un fichier externe
     environment:
