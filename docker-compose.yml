@@ -52,11 +52,11 @@ services:
     env_file:
       - .env  # Charge les variables d'environnement depuis un fichier externe
     environment:
-      - PUID=1000
-      - PGID=1000
+      - PUID=${PUID}
+      - PGID=${PGID}
       - TZ=Etc/UTC
-      - APP_URL=${APP_URL}
-      - APP_KEY=ugTtoNhmw95FG1vy14e+BM/kaF1QyWG0tI/f+sqZ+pQ=
+      - APP_URL=https://${APP_URL}
+      - APP_KEY=${APP_KEY}
       - DB_HOST=mysql
       - DB_PORT=${MYSQL_PORT}
       - DB_USERNAME=${MYSQL_USER}
