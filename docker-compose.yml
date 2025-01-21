@@ -1,0 +1,112 @@
+services:
+  proxy:
+    image: traefik:v2.9
+    restart: always
+    command:
+      # Active le support pour les conteneurs Docker
+      - "--providers.docker=true"
+      # Définit les points d'entrée pour HTTP et HTTPS
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Configure Let's Encrypt pour le certificat SSL automatique
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=${LETSENCRYPT_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      # Ajout du middleware pour la redirection HTTP -> HTTPS
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      # Activation des logs d'accès et configuration
+      - "--accesslog=true"
+      - "--accesslog.filepath=/logs/access.log"
+      - "--accesslog.bufferingsize=100"
+    ports:
+      - "80:80"  # Expose le service HTTP
+      - "443:443" # Expose le service HTTPS
+      - "8080:8080" # Interface d'administration de Traefik
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"  # Accès à Docker pour la découverte automatique des services
+      - "./letsencrypt:/letsencrypt"  # Stockage des certificats SSL
+      - "./logs:/logs"  # Stockage des logs d'accès
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DOMAIN}`)"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+      - "traefik.http.middlewares.auth.basicauth.users=${BASIC_AUTH}"
+      - "traefik.http.routers.traefik.middlewares=auth"
+    networks:
+      - traefik_network
+
+  bookstack:
+    image: linuxserver/bookstack:latest
+    restart: always
+    env_file:
+      - .env  # Charge les variables d'environnement depuis un fichier externe
+    environment:
+      - PUID=${PUID}  # ID utilisateur pour éviter les conflits de permissions
+      - PGID=${PGID}  # ID de groupe pour éviter les conflits de permissions
+      - DB_HOST=${DB_HOST}  # Adresse de la base de données
+      - DB_USER=${DB_USER}  # Nom d'utilisateur de la base de données
+      - DB_PASS=${DB_PASS}  # Mot de passe de la base de données
+      - DB_DATABASE=${DB_DATABASE}  # Nom de la base de données
+      - APP_URL=https://${APP_URL}  # URL publique de l'application
+    volumes:
+      - bookstack_data:/config  # Stocke les fichiers de configuration et les données persistantes
+      - ./bookstack.env:/config/.env  # Monte un fichier d'environnement spécifique
+    depends_on:
+      - mysql  # Attend que MySQL soit disponible avant de démarrer
+      - redis  # Attend que Redis soit disponible avant de démarrer
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bookstack.rule=Host(`${APP_URL}`)"
+      - "traefik.http.routers.bookstack.entrypoints=websecure"
+      - "traefik.http.routers.bookstack.tls.certresolver=myresolver"
+      - "traefik.http.services.bookstack.loadbalancer.server.port=80"
+    networks:
+      - traefik_network
+
+  mysql:
+    image: mysql:8.0
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}  # Mot de passe root MySQL
+      - MYSQL_DATABASE=${MYSQL_DATABASE}  # Base de données utilisée
+      - MYSQL_USER=${MYSQL_USER}  # Nom d'utilisateur pour BookStack
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}  # Mot de passe de l'utilisateur
+    volumes:
+      - mysql_data:/var/lib/mysql  # Stockage persistant de la base de données
+      - ./backup:/backup  # Monte un dossier pour stocker les sauvegardes
+    command: --default-authentication-plugin=mysql_native_password  # Assure la compatibilité avec les connexions MySQL classiques
+    networks:
+      - traefik_network
+
+  redis:
+    image: redis:latest
+    restart: always
+    command: ["redis-server", "--appendonly", "yes"]  # Active l'écriture persistante
+    volumes:
+      - redis_data:/data  # Stockage persistant des données Redis
+    networks:
+      - traefik_network
+
+  backup:
+    image: debian:latest
+    restart: always
+    volumes:
+      - ./backup:/backup  # Monte un dossier pour stocker les backups
+    command: "/bin/sh -c 'while true; do mysqldump -h mysql -u ${MYSQL_USER} -p${MYSQL_PASSWORD} ${MYSQL_DATABASE} > /backup/bookstack_backup.sql; sleep 86400; done'"
+    depends_on:
+      - mysql  # Attend que MySQL soit disponible avant d'exécuter les sauvegardes
+    networks:
+      - traefik_network
+
+volumes:
+  bookstack_data:
+  mysql_data:
+  redis_data:
+  letsencrypt:  # Stockage des certificats SSL
+
+networks:
+  traefik_network:
+    external: true
